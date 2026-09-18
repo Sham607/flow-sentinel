@@ -106,6 +106,12 @@ async fn main() -> Result<()> {
         min_buy_ratio_pct: 60.0,
         min_market_cap_usd: 50000.0,
         max_market_cap_usd: 5000000.0,
+        solana_tracked_programs: flow_sentinel::chains::solana::DEFAULT_TRACKED_PROGRAMS
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        solana_max_tx_per_cycle: 40,
+        solana_sigs_per_feed: 100,
     });
 
     let db = Arc::new(SentinelDb::new(&config.database_path)?);

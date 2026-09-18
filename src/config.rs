@@ -13,6 +13,9 @@ pub struct Config {
     pub min_buy_ratio_pct: f64,
     pub min_market_cap_usd: f64,
     pub max_market_cap_usd: f64,
+    pub solana_tracked_programs: Vec<String>,
+    pub solana_max_tx_per_cycle: usize,
+    pub solana_sigs_per_feed: usize,
 }
 
 impl Config {
@@ -68,6 +71,25 @@ impl Config {
             .parse::<f64>()
             .unwrap_or(5000000.0);
 
+        let solana_programs_default = crate::chains::solana::DEFAULT_TRACKED_PROGRAMS.join(",");
+        let solana_programs_str = env::var("SOLANA_TRACKED_PROGRAMS")
+            .unwrap_or_else(|_| solana_programs_default);
+        let solana_tracked_programs: Vec<String> = solana_programs_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        let solana_max_tx_per_cycle = env::var("SOLANA_MAX_TX_PER_CYCLE")
+            .unwrap_or_else(|_| "40".to_string())
+            .parse::<usize>()
+            .unwrap_or(40);
+
+        let solana_sigs_per_feed = env::var("SOLANA_SIGS_PER_FEED")
+            .unwrap_or_else(|_| "100".to_string())
+            .parse::<usize>()
+            .unwrap_or(100);
+
         Ok(Self {
             robinhood_rpc_urls,
             robinhood_scan_chunk,
@@ -79,6 +101,9 @@ impl Config {
             min_buy_ratio_pct,
             min_market_cap_usd,
             max_market_cap_usd,
+            solana_tracked_programs,
+            solana_max_tx_per_cycle,
+            solana_sigs_per_feed,
         })
     }
 }
