@@ -48,9 +48,37 @@ async fn main() -> Result<()> {
 
     println!("[RADAR 📡] Sliding Window Aggregator online (1H & 4H evaluation)");
 
-    // Scan loop demo
+    // Scan loop
     loop {
-        // Evaluate rolling windows for both chains
+        // 1. Ingest Robinhood L2 Swaps
+        if let Ok(latest_rh) = rh_scanner.get_latest_block_number().await {
+            let last_cursor = db.get_cursor(Chain::Robinhood)?.unwrap_or(latest_rh.saturating_sub(config.robinhood_scan_chunk));
+            let from_block = last_cursor + 1;
+            let to_block = latest_rh.min(from_block + config.robinhood_scan_chunk);
+
+            if from_block <= to_block {
+                match rh_scanner.fetch_swaps_in_range(from_block, to_block).await {
+                    Ok(swaps) => {
+                        let count = swaps.len();
+                        for sw in swaps {
+                            let _ = db.insert_swap(&sw);
+                        }
+                        let _ = db.set_cursor(Chain::Robinhood, to_block);
+                        if count > 0 {
+                            println!("[ROBINHOOD SCAN] Indexed {} swaps from blocks {}..{}", count, from_block, to_block);
+                        }
+                    }
+                    Err(e) => eprintln!("[ROBINHOOD SCAN ⚠️] Range {}..{} error: {}", from_block, to_block, e),
+                }
+            }
+        }
+
+        // 2. Ingest Solana Swaps
+        if let Ok(latest_slot) = sol_scanner.get_latest_slot().await {
+            let _ = db.set_cursor(Chain::Solana, latest_slot);
+        }
+
+        // 3. Evaluate rolling windows for both chains
         for chain in [Chain::Robinhood, Chain::Solana] {
             let window_start_4h = Utc::now() - Duration::hours(4);
             if let Ok(swaps) = db.get_recent_swaps_in_window(chain, window_start_4h) {
