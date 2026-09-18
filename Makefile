@@ -1,4 +1,4 @@
-.PHONY: all build release test check run start stop restart status logs clean
+.PHONY: all build release test check run start stop restart status logs clean tui
 
 all: build
 
@@ -16,6 +16,9 @@ check:
 
 run:
 	cargo run --release
+
+tui:
+	cargo run --release --bin sentinel-tui
 
 start:
 	systemctl --user start flow-sentinel.service

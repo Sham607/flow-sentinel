@@ -4,7 +4,7 @@ use rusqlite::{params, Connection};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use crate::models::{Chain, FlowSignal, SwapRecord, SwapSide};
+use crate::models::{Chain, FlowSignal, SignalType, SwapRecord, SwapSide};
 
 #[derive(Clone)]
 pub struct SentinelDb {
@@ -182,6 +182,130 @@ impl SentinelDb {
         )?;
 
         let rows = stmt.query_map(params![chain_str, since_str], |row| {
+            let ch_str: String = row.get(0)?;
+            let side_str: String = row.get(4)?;
+            let ts_str: String = row.get(10)?;
+
+            let chain = if ch_str == "Robinhood" {
+                Chain::Robinhood
+            } else {
+                Chain::Solana
+            };
+            let side = if side_str == "BUY" {
+                SwapSide::Buy
+            } else {
+                SwapSide::Sell
+            };
+            let timestamp = DateTime::parse_from_rfc3339(&ts_str)
+                .map(|dt| dt.with_timezone(&Utc))
+                .unwrap_or_else(|_| Utc::now());
+
+            Ok(SwapRecord {
+                chain,
+                token_address: row.get(1)?,
+                token_symbol: row.get(2)?,
+                swapper_address: row.get(3)?,
+                side,
+                amount_usd: row.get(5)?,
+                token_amount: row.get(6)?,
+                pool_address: row.get(7)?,
+                tx_hash: row.get(8)?,
+                block_number_or_slot: row.get::<_, i64>(9)? as u64,
+                timestamp,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_recent_signals(&self, limit: usize) -> Result<Vec<FlowSignal>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT chain, token_address, token_symbol, timeframe, signal_type,
+                    confidence_score, summary, net_inflow_usd, buy_volume_usd,
+                    sell_volume_usd, total_volume_usd, buy_ratio_pct,
+                    unique_buyers, unique_sellers, total_swaps,
+                    window_start, window_end, detected_at
+             FROM flow_signals
+             ORDER BY detected_at DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![limit as i64], |row| {
+            let ch_str: String = row.get(0)?;
+            let sig_str: String = row.get(4)?;
+            let chain = if ch_str == "Robinhood" {
+                Chain::Robinhood
+            } else {
+                Chain::Solana
+            };
+
+            let signal_type = match sig_str.as_str() {
+                "StrongAccumulation" => SignalType::StrongAccumulation,
+                "OrganicMomentum" => SignalType::OrganicMomentum,
+                "WashTradingSuspect" => SignalType::WashTradingSuspect,
+                "HeavyDistribution" => SignalType::HeavyDistribution,
+                _ => SignalType::Neutral,
+            };
+
+            let parse_ts = |s: String| {
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now())
+            };
+
+            let metrics = crate::models::TimeframeMetrics {
+                chain,
+                token_address: row.get(1)?,
+                token_symbol: row.get(2)?,
+                timeframe: row.get(3)?,
+                net_inflow_usd: row.get(7)?,
+                buy_volume_usd: row.get(8)?,
+                sell_volume_usd: row.get(9)?,
+                total_volume_usd: row.get(10)?,
+                buy_ratio_pct: row.get(11)?,
+                unique_buyers: row.get::<_, i64>(12)? as usize,
+                unique_sellers: row.get::<_, i64>(13)? as usize,
+                total_swaps: row.get::<_, i64>(14)? as usize,
+                window_start: parse_ts(row.get(15)?),
+                window_end: parse_ts(row.get(16)?),
+            };
+
+            Ok(FlowSignal {
+                chain,
+                token_address: row.get(1)?,
+                token_symbol: row.get(2)?,
+                timeframe: row.get(3)?,
+                signal_type,
+                confidence_score: row.get(5)?,
+                summary: row.get(6)?,
+                metrics,
+                detected_at: parse_ts(row.get(17)?),
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    pub fn get_recent_swaps(&self, limit: usize) -> Result<Vec<SwapRecord>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT chain, token_address, token_symbol, swapper_address, side,
+                    amount_usd, token_amount, pool_address, tx_hash, block_number, timestamp
+             FROM raw_swaps
+             ORDER BY timestamp DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![limit as i64], |row| {
             let ch_str: String = row.get(0)?;
             let side_str: String = row.get(4)?;
             let ts_str: String = row.get(10)?;
