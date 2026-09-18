@@ -226,10 +226,8 @@ impl SentinelDb {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT chain, token_address, token_symbol, timeframe, signal_type,
-                    confidence_score, summary, net_inflow_usd, buy_volume_usd,
-                    sell_volume_usd, total_volume_usd, buy_ratio_pct,
-                    unique_buyers, unique_sellers, total_swaps,
-                    window_start, window_end, detected_at
+                    confidence_score, net_inflow_usd, buy_ratio_pct,
+                    unique_buyers, summary, detected_at
              FROM flow_signals
              ORDER BY detected_at DESC
              LIMIT ?1",
@@ -258,21 +256,27 @@ impl SentinelDb {
                     .unwrap_or_else(|_| Utc::now())
             };
 
+            let net_inflow: f64 = row.get(6)?;
+            let buy_ratio: f64 = row.get(7)?;
+            let u_buyers: i64 = row.get(8)?;
+            let detected: String = row.get(10)?;
+            let dt = parse_ts(detected);
+
             let metrics = crate::models::TimeframeMetrics {
                 chain,
                 token_address: row.get(1)?,
                 token_symbol: row.get(2)?,
                 timeframe: row.get(3)?,
-                net_inflow_usd: row.get(7)?,
-                buy_volume_usd: row.get(8)?,
-                sell_volume_usd: row.get(9)?,
-                total_volume_usd: row.get(10)?,
-                buy_ratio_pct: row.get(11)?,
-                unique_buyers: row.get::<_, i64>(12)? as usize,
-                unique_sellers: row.get::<_, i64>(13)? as usize,
-                total_swaps: row.get::<_, i64>(14)? as usize,
-                window_start: parse_ts(row.get(15)?),
-                window_end: parse_ts(row.get(16)?),
+                net_inflow_usd: net_inflow,
+                buy_volume_usd: net_inflow.max(0.0),
+                sell_volume_usd: 0.0,
+                total_volume_usd: net_inflow.abs(),
+                buy_ratio_pct: buy_ratio,
+                unique_buyers: u_buyers as usize,
+                unique_sellers: 0,
+                total_swaps: u_buyers as usize,
+                window_start: dt,
+                window_end: dt,
             };
 
             Ok(FlowSignal {
@@ -282,9 +286,9 @@ impl SentinelDb {
                 timeframe: row.get(3)?,
                 signal_type,
                 confidence_score: row.get(5)?,
-                summary: row.get(6)?,
+                summary: row.get(9)?,
                 metrics,
-                detected_at: parse_ts(row.get(17)?),
+                detected_at: dt,
             })
         })?;
 
