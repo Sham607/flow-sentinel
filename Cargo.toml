@@ -1,0 +1,25 @@
+[package]
+name = "flow-sentinel"
+version = "0.1.0"
+edition = "2024"
+authors = ["Suginode <ops@suginode.local>"]
+description = "Dual-Chain (Robinhood L2 + Solana) Read-Only On-Chain Flow & Signal Radar (1H/4H)"
+
+[lib]
+name = "flow_sentinel"
+path = "src/lib.rs"
+
+[[bin]]
+name = "flow-sentinel"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.44", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rusqlite = { version = "0.33", features = ["bundled"] }
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+dotenvy = "0.15"
+sha3 = "0.10"
