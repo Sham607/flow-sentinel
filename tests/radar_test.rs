@@ -53,12 +53,16 @@ fn test_window_aggregator_and_strong_accumulation() {
     assert_eq!(m.unique_sellers, 1);
     assert!(m.buy_ratio_pct > 90.0);
 
-    let detector = SignalDetector::new(500.0, 2000.0, 65.0);
-    let sig = detector.detect_signal(m);
+    let detector = SignalDetector::new(500.0, 2000.0, 65.0, 50000.0, 5000000.0);
+    let sig = detector.detect_signal(m, Some(500000.0));
     assert!(sig.is_some());
     let sig = sig.unwrap();
     assert!(matches!(sig.signal_type, SignalType::StrongAccumulation));
     assert!(sig.confidence_score >= 85.0);
+
+    // Test rejection when market cap exceeds $5M
+    let sig_rejected = detector.detect_signal(m, Some(10000000.0));
+    assert!(sig_rejected.is_none());
 }
 
 #[test]
@@ -89,8 +93,8 @@ fn test_wash_trading_detector_gating() {
     assert_eq!(m.unique_buyers, 1);
     assert_eq!(m.total_volume_usd, 2500.0);
 
-    let detector = SignalDetector::new(500.0, 2000.0, 65.0);
-    let sig = detector.detect_signal(m).unwrap();
+    let detector = SignalDetector::new(500.0, 2000.0, 65.0, 50000.0, 5000000.0);
+    let sig = detector.detect_signal(m, None).unwrap();
     assert!(matches!(sig.signal_type, SignalType::WashTradingSuspect));
 }
 

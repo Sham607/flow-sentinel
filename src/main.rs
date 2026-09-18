@@ -14,6 +14,7 @@ use crate::chains::robinhood::RobinhoodScanner;
 use crate::chains::solana::SolanaScanner;
 use crate::config::Config;
 use crate::models::Chain;
+use crate::radar::market_cap::MarketCapResolver;
 use crate::radar::signal_detector::SignalDetector;
 use crate::storage::db::SentinelDb;
 
@@ -29,10 +30,13 @@ async fn main() -> Result<()> {
 
     let rh_scanner = RobinhoodScanner::new(config.robinhood_rpc_urls.clone());
     let sol_scanner = SolanaScanner::new(config.solana_rpc_url.clone());
+    let mc_resolver = MarketCapResolver::new();
     let detector = SignalDetector::new(
         config.min_inflow_usd_1h,
         config.min_inflow_usd_4h,
         config.min_buy_ratio_pct,
+        config.min_market_cap_usd,
+        config.max_market_cap_usd,
     );
 
     // Initial check on latest blocks/slots
@@ -85,7 +89,8 @@ async fn main() -> Result<()> {
                 // 1H metrics
                 let metrics_1h = RollingAggregator::compute_metrics(chain, &swaps, 1);
                 for m in metrics_1h {
-                    if let Some(sig) = detector.detect_signal(&m) {
+                    let mc = mc_resolver.get_market_cap(&m.token_address).await;
+                    if let Some(sig) = detector.detect_signal(&m, mc) {
                         println!(
                             "[FLOW SIGNAL 🚨] [{}] [{}] {} ({}) -> {:?} (Conf: {:.1}%): {}",
                             sig.chain, sig.timeframe, sig.token_symbol, sig.token_address,
@@ -98,7 +103,8 @@ async fn main() -> Result<()> {
                 // 4H metrics
                 let metrics_4h = RollingAggregator::compute_metrics(chain, &swaps, 4);
                 for m in metrics_4h {
-                    if let Some(sig) = detector.detect_signal(&m) {
+                    let mc = mc_resolver.get_market_cap(&m.token_address).await;
+                    if let Some(sig) = detector.detect_signal(&m, mc) {
                         println!(
                             "[FLOW SIGNAL 🚨] [{}] [{}] {} ({}) -> {:?} (Conf: {:.1}%): {}",
                             sig.chain, sig.timeframe, sig.token_symbol, sig.token_address,

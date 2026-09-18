@@ -96,14 +96,16 @@ impl AppState {
 async fn main() -> Result<()> {
     dotenvy::dotenv().ok();
     let config = Config::load().unwrap_or_else(|_| Config {
-        robinhood_rpc_urls: vec!["https://rpc.robinhood.com".to_string()],
-        robinhood_scan_chunk: 50,
+        robinhood_rpc_urls: vec!["https://robinhood.api.pocket.network".to_string()],
+        robinhood_scan_chunk: 1000,
         solana_rpc_url: "https://api.mainnet-beta.solana.com".to_string(),
         database_path: "data/flow_sentinel.db".to_string(),
+        poll_interval_secs: 10,
         min_inflow_usd_1h: 500.0,
         min_inflow_usd_4h: 2000.0,
-        min_buy_ratio_pct: 65.0,
-        poll_interval_secs: 10,
+        min_buy_ratio_pct: 60.0,
+        min_market_cap_usd: 50000.0,
+        max_market_cap_usd: 5000000.0,
     });
 
     let db = Arc::new(SentinelDb::new(&config.database_path)?);

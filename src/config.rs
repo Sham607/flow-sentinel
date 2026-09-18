@@ -11,6 +11,8 @@ pub struct Config {
     pub min_inflow_usd_1h: f64,
     pub min_inflow_usd_4h: f64,
     pub min_buy_ratio_pct: f64,
+    pub min_market_cap_usd: f64,
+    pub max_market_cap_usd: f64,
 }
 
 impl Config {
@@ -56,6 +58,16 @@ impl Config {
             .parse::<f64>()
             .unwrap_or(60.0);
 
+        let min_market_cap_usd = env::var("MIN_MARKET_CAP_USD")
+            .unwrap_or_else(|_| "50000.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(50000.0);
+
+        let max_market_cap_usd = env::var("MAX_MARKET_CAP_USD")
+            .unwrap_or_else(|_| "5000000.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(5000000.0);
+
         Ok(Self {
             robinhood_rpc_urls,
             robinhood_scan_chunk,
@@ -65,6 +77,8 @@ impl Config {
             min_inflow_usd_1h,
             min_inflow_usd_4h,
             min_buy_ratio_pct,
+            min_market_cap_usd,
+            max_market_cap_usd,
         })
     }
 }
