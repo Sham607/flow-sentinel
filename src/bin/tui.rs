@@ -33,6 +33,8 @@ struct AppState {
     active_tab: ActiveTab,
     signals: Vec<FlowSignal>,
     swaps: Vec<SwapRecord>,
+    leaderboard_1h: Vec<FlowSignal>,
+    leaderboard_4h: Vec<FlowSignal>,
     db: Arc<SentinelDb>,
     selected_index: usize,
     status_msg: String,
@@ -44,6 +46,8 @@ impl AppState {
             active_tab: ActiveTab::RadarSignals,
             signals: Vec::new(),
             swaps: Vec::new(),
+            leaderboard_1h: Vec::new(),
+            leaderboard_4h: Vec::new(),
             db,
             selected_index: 0,
             status_msg: "Radar active. Monitoring 1H/4H flow...".to_string(),
@@ -56,6 +60,12 @@ impl AppState {
         }
         if let Ok(swaps) = self.db.get_recent_swaps(100) {
             self.swaps = swaps;
+        }
+        if let Ok(lb1) = self.db.get_timeframe_leaderboard("1H", 30) {
+            self.leaderboard_1h = lb1;
+        }
+        if let Ok(lb4) = self.db.get_timeframe_leaderboard("4H", 30) {
+            self.leaderboard_4h = lb4;
         }
     }
 
@@ -207,8 +217,8 @@ fn ui(f: &mut Frame, app: &AppState) {
     match app.active_tab {
         ActiveTab::RadarSignals => render_radar_tab(f, chunks[1], app),
         ActiveTab::FlowFeed => render_feed_tab(f, chunks[1], app),
-        ActiveTab::Metrics1H => render_timeframe_tab(f, chunks[1], app, "1-HOUR"),
-        ActiveTab::Metrics4H => render_timeframe_tab(f, chunks[1], app, "4-HOUR"),
+        ActiveTab::Metrics1H => render_timeframe_tab(f, chunks[1], &app.leaderboard_1h, "1-HOUR"),
+        ActiveTab::Metrics4H => render_timeframe_tab(f, chunks[1], &app.leaderboard_4h, "4-HOUR"),
         ActiveTab::ConfigChain => render_config_tab(f, chunks[1]),
     }
 
@@ -353,37 +363,74 @@ fn render_feed_tab(f: &mut Frame, area: Rect, app: &AppState) {
     f.render_widget(list, area);
 }
 
-fn render_timeframe_tab(f: &mut Frame, area: Rect, _app: &AppState, tf: &str) {
-    let content = vec![
-        Line::from(Span::styled(
-            format!("=== {} ACCUMULATION RADAR MATRIX ===", tf),
-            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
-        )),
-        Line::from(""),
-        Line::from(vec![
-            Span::styled("Timeframe Window: ", Style::default().fg(Color::Cyan)),
-            Span::raw(format!("Rolling {}", tf)),
-        ]),
-        Line::from(vec![
-            Span::styled("Evaluation Criteria: ", Style::default().fg(Color::Cyan)),
-            Span::raw("Net Inflow Velocity + Unique Buyer Density + Anti-Wash Churn Gate"),
-        ]),
-        Line::from(""),
-        Line::from(Span::styled(
-            "Historical tokens with active 1H/4H accumulation signals are aggregated and ranked by confidence score.",
-            Style::default().fg(Color::DarkGray),
-        )),
-    ];
+fn render_timeframe_tab(f: &mut Frame, area: Rect, items_list: &[FlowSignal], tf: &str) {
+    if items_list.is_empty() {
+        let content = vec![
+            Line::from(Span::styled(
+                format!("=== {} ACCUMULATION RADAR MATRIX ===", tf),
+                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(""),
+            Line::from(vec![
+                Span::styled("Timeframe Window: ", Style::default().fg(Color::Cyan)),
+                Span::raw(format!("Rolling {}", tf)),
+            ]),
+            Line::from(vec![
+                Span::styled("Status: ", Style::default().fg(Color::DarkGray)),
+                Span::raw("Accumulating on-chain window metrics..."),
+            ]),
+        ];
+        let p = Paragraph::new(content).block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(format!(" 📊 Top Accumulated Tokens ({}) ", tf))
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(Color::Yellow)),
+        );
+        f.render_widget(p, area);
+        return;
+    }
 
-    let p = Paragraph::new(content).block(
+    let rows: Vec<ListItem> = items_list
+        .iter()
+        .enumerate()
+        .map(|(rank, sig)| {
+            let (tag_color, tag_str) = match sig.signal_type {
+                SignalType::StrongAccumulation => (Color::Green, "STRONG ACCUMULATION"),
+                SignalType::OrganicMomentum => (Color::LightGreen, "ORGANIC MOMENTUM"),
+                SignalType::WashTradingSuspect => (Color::Red, "WASH TRADING SUSPECT"),
+                SignalType::HeavyDistribution => (Color::LightRed, "HEAVY DISTRIBUTION"),
+                SignalType::Neutral => (Color::DarkGray, "NEUTRAL"),
+            };
+
+            let line1 = Line::from(vec![
+                Span::styled(format!("#{:02} ", rank + 1), Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("{:>10} ", sig.token_symbol), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+                Span::styled(format!("[{}] ", tag_str), Style::default().fg(tag_color)),
+                Span::styled(format!("Net Inflow: +${:<9.2}", sig.metrics.net_inflow_usd), Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)),
+                Span::raw(format!(" | Buy Ratio: {:.1}%", sig.metrics.buy_ratio_pct)),
+                Span::raw(format!(" | Unique Buyers: {}", sig.metrics.unique_buyers)),
+                Span::styled(format!(" | Conf: {:.1}%", sig.confidence_score), Style::default().fg(Color::Cyan)),
+            ]);
+
+            let line2 = Line::from(vec![
+                Span::raw("     ↳ Contract: "),
+                Span::styled(&sig.token_address, Style::default().fg(Color::DarkGray)),
+            ]);
+
+            ListItem::new(vec![line1, line2, Line::from("")])
+        })
+        .collect();
+
+    let list = List::new(rows).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(format!(" 📊 {} Window Aggregates ", tf))
+            .title(format!(" 📊 Top Accumulated Tokens (Ranked by Inflow - {}) ", tf))
             .border_type(BorderType::Rounded)
             .border_style(Style::default().fg(Color::Yellow)),
     );
 
-    f.render_widget(p, area);
+    f.render_widget(list, area);
 }
 
 fn render_config_tab(f: &mut Frame, area: Rect) {

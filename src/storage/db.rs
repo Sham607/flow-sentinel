@@ -349,4 +349,83 @@ impl SentinelDb {
         }
         Ok(out)
     }
+
+    pub fn get_timeframe_leaderboard(&self, tf: &str, limit: usize) -> Result<Vec<FlowSignal>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT chain, token_address, token_symbol, timeframe, signal_type,
+                    confidence_score, net_inflow_usd, buy_ratio_pct,
+                    unique_buyers, summary, detected_at
+             FROM flow_signals
+             WHERE timeframe = ?1 AND token_symbol != 'RH-V4'
+             GROUP BY token_address
+             ORDER BY net_inflow_usd DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![tf, limit as i64], |row| {
+            let ch_str: String = row.get(0)?;
+            let sig_str: String = row.get(4)?;
+            let chain = if ch_str == "Robinhood" {
+                Chain::Robinhood
+            } else {
+                Chain::Solana
+            };
+
+            let signal_type = match sig_str.as_str() {
+                "StrongAccumulation" => SignalType::StrongAccumulation,
+                "OrganicMomentum" => SignalType::OrganicMomentum,
+                "WashTradingSuspect" => SignalType::WashTradingSuspect,
+                "HeavyDistribution" => SignalType::HeavyDistribution,
+                _ => SignalType::Neutral,
+            };
+
+            let parse_ts = |s: String| {
+                DateTime::parse_from_rfc3339(&s)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now())
+            };
+
+            let net_inflow: f64 = row.get(6)?;
+            let buy_ratio: f64 = row.get(7)?;
+            let u_buyers: i64 = row.get(8)?;
+            let detected: String = row.get(10)?;
+            let dt = parse_ts(detected);
+
+            let metrics = crate::models::TimeframeMetrics {
+                chain,
+                token_address: row.get(1)?,
+                token_symbol: row.get(2)?,
+                timeframe: row.get(3)?,
+                net_inflow_usd: net_inflow,
+                buy_volume_usd: net_inflow.max(0.0),
+                sell_volume_usd: 0.0,
+                total_volume_usd: net_inflow.abs(),
+                buy_ratio_pct: buy_ratio,
+                unique_buyers: u_buyers as usize,
+                unique_sellers: 0,
+                total_swaps: u_buyers as usize,
+                window_start: dt,
+                window_end: dt,
+            };
+
+            Ok(FlowSignal {
+                chain,
+                token_address: row.get(1)?,
+                token_symbol: row.get(2)?,
+                timeframe: row.get(3)?,
+                signal_type,
+                confidence_score: row.get(5)?,
+                summary: row.get(9)?,
+                metrics,
+                detected_at: dt,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
 }
