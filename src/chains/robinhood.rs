@@ -30,7 +30,7 @@ pub struct RobinhoodScanner {
 impl RobinhoodScanner {
     pub fn new(rpc_urls: Vec<String>) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_default();
 
