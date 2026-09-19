@@ -42,7 +42,7 @@ fn test_window_aggregator_and_strong_accumulation() {
         timestamp: now - Duration::minutes(5),
     });
 
-    let metrics_1h = RollingAggregator::compute_metrics(Chain::Robinhood, &swaps, 1);
+    let metrics_1h = RollingAggregator::compute_metrics(Chain::Robinhood, &swaps, 60);
     assert_eq!(metrics_1h.len(), 1);
     let m = &metrics_1h[0];
 
@@ -52,8 +52,9 @@ fn test_window_aggregator_and_strong_accumulation() {
     assert_eq!(m.unique_buyers, 4);
     assert_eq!(m.unique_sellers, 1);
     assert!(m.buy_ratio_pct > 90.0);
+    assert_eq!(m.timeframe, "1H");
 
-    let detector = SignalDetector::new(500.0, 2000.0, 65.0, 50000.0, 5000000.0);
+    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, 50000.0, 5000000.0);
     let sig = detector.detect_signal(m, Some(500000.0));
     assert!(sig.is_some());
     let sig = sig.unwrap();
@@ -88,14 +89,83 @@ fn test_wash_trading_detector_gating() {
         });
     }
 
-    let metrics_1h = RollingAggregator::compute_metrics(Chain::Solana, &swaps, 1);
+    let metrics_1h = RollingAggregator::compute_metrics(Chain::Solana, &swaps, 60);
     let m = &metrics_1h[0];
     assert_eq!(m.unique_buyers, 1);
     assert_eq!(m.total_volume_usd, 2500.0);
 
-    let detector = SignalDetector::new(500.0, 2000.0, 65.0, 50000.0, 5000000.0);
+    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, 50000.0, 5000000.0);
     let sig = detector.detect_signal(m, None).unwrap();
     assert!(matches!(sig.signal_type, SignalType::WashTradingSuspect));
+}
+
+#[test]
+fn test_five_minute_window_and_threshold() {
+    let now = Utc::now();
+    let token = "0xFIVE_MIN_TOKEN".to_string();
+
+    // 3 distinct buyers within the last 3 minutes (inside 5M window)
+    let mut swaps = Vec::new();
+    for i in 1..=3 {
+        swaps.push(SwapRecord {
+            chain: Chain::Robinhood,
+            token_address: token.clone(),
+            token_symbol: "FAST".to_string(),
+            swapper_address: format!("0xSCALPER_{}", i),
+            side: SwapSide::Buy,
+            amount_usd: 40.0,
+            token_amount: 100.0,
+            pool_address: "0xPOOL".to_string(),
+            tx_hash: format!("0xTX_FAST_{}", i),
+            block_number_or_slot: 3000 + i,
+            timestamp: now - Duration::minutes(i as i64),
+        });
+    }
+    // One old buyer 10 minutes ago: inside 15M window, OUTSIDE 5M window
+    swaps.push(SwapRecord {
+        chain: Chain::Robinhood,
+        token_address: token.clone(),
+        token_symbol: "FAST".to_string(),
+        swapper_address: "0xOLD_BUYER".to_string(),
+        side: SwapSide::Buy,
+        amount_usd: 40.0,
+        token_amount: 100.0,
+        pool_address: "0xPOOL".to_string(),
+        tx_hash: "0xTX_OLD".to_string(),
+        block_number_or_slot: 3010,
+        timestamp: now - Duration::minutes(10),
+    });
+
+    // 5M window: only the 3 fresh buyers count, label must be "5M"
+    let metrics_5m = RollingAggregator::compute_metrics(Chain::Robinhood, &swaps, 5);
+    assert_eq!(metrics_5m.len(), 1);
+    let m5 = &metrics_5m[0];
+    assert_eq!(m5.timeframe, "5M");
+    assert_eq!(m5.unique_buyers, 3);
+    assert_eq!(m5.buy_volume_usd, 120.0);
+
+    // 15M window: all 4 buyers count, label must be "15M"
+    let metrics_15m = RollingAggregator::compute_metrics(Chain::Robinhood, &swaps, 15);
+    let m15 = &metrics_15m[0];
+    assert_eq!(m15.timeframe, "15M");
+    assert_eq!(m15.unique_buyers, 4);
+    assert_eq!(m15.buy_volume_usd, 160.0);
+
+    // Detector: 5M label uses the 5M threshold ($100), so $120 net inflow passes
+    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, 50000.0, 5000000.0);
+    let sig = detector.detect_signal(m5, Some(500000.0)).unwrap();
+    assert!(matches!(sig.signal_type, SignalType::StrongAccumulation));
+    assert_eq!(sig.timeframe, "5M");
+
+    // Same metrics labelled 1H would need the $500 1H threshold -> rejected
+    let mut m1h = m5.clone();
+    m1h.timeframe = "1H".to_string();
+    assert!(detector.detect_signal(&m1h, Some(500000.0)).is_none());
+
+    // min_unique_buyers gate: only 2 unique buyers must be rejected
+    let mut m2buyers = m5.clone();
+    m2buyers.unique_buyers = 2;
+    assert!(detector.detect_signal(&m2buyers, Some(500000.0)).is_none());
 }
 
 #[test]

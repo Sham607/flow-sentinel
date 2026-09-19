@@ -35,9 +35,12 @@ async fn main() -> Result<()> {
     );
     let mc_resolver = MarketCapResolver::new();
     let detector = SignalDetector::new(
+        config.min_inflow_usd_5m,
+        config.min_inflow_usd_15m,
         config.min_inflow_usd_1h,
         config.min_inflow_usd_4h,
         config.min_buy_ratio_pct,
+        config.min_unique_buyers,
         config.min_market_cap_usd,
         config.max_market_cap_usd,
     );
@@ -137,35 +140,23 @@ async fn main() -> Result<()> {
             }
         }
 
-        // 2. Evaluate rolling windows for both chains (Robinhood & Solana)
+        // 2. Evaluate rolling windows (5M / 15M / 1H / 4H) for both chains
         for chain in [Chain::Robinhood, Chain::Solana] {
             let window_start_4h = Utc::now() - Duration::hours(4);
             if let Ok(swaps) = db.get_recent_swaps_in_window(chain, window_start_4h) {
-                // 1H metrics
-                let metrics_1h = RollingAggregator::compute_metrics(chain, &swaps, 1);
-                for m in metrics_1h {
-                    let mc = mc_resolver.get_market_cap(&m.token_address).await;
-                    if let Some(sig) = detector.detect_signal(&m, mc) {
-                        println!(
-                            "[FLOW SIGNAL 🚨] [{}] [{}] {} ({}) -> {:?} (Conf: {:.1}%): {}",
-                            sig.chain, sig.timeframe, sig.token_symbol, sig.token_address,
-                            sig.signal_type, sig.confidence_score, sig.summary
-                        );
-                        let _ = db.insert_signal(&sig);
-                    }
-                }
-
-                // 4H metrics
-                let metrics_4h = RollingAggregator::compute_metrics(chain, &swaps, 4);
-                for m in metrics_4h {
-                    let mc = mc_resolver.get_market_cap(&m.token_address).await;
-                    if let Some(sig) = detector.detect_signal(&m, mc) {
-                        println!(
-                            "[FLOW SIGNAL 🚨] [{}] [{}] {} ({}) -> {:?} (Conf: {:.1}%): {}",
-                            sig.chain, sig.timeframe, sig.token_symbol, sig.token_address,
-                            sig.signal_type, sig.confidence_score, sig.summary
-                        );
-                        let _ = db.insert_signal(&sig);
+                // Windows in minutes; the 4H swap set is a superset, aggregator filters per window
+                for minutes in [5i64, 15, 60, 240] {
+                    let metrics = RollingAggregator::compute_metrics(chain, &swaps, minutes);
+                    for m in metrics {
+                        let mc = mc_resolver.get_market_cap(&m.token_address).await;
+                        if let Some(sig) = detector.detect_signal(&m, mc) {
+                            println!(
+                                "[FLOW SIGNAL 🚨] [{}] [{}] {} ({}) -> {:?} (Conf: {:.1}%): {}",
+                                sig.chain, sig.timeframe, sig.token_symbol, sig.token_address,
+                                sig.signal_type, sig.confidence_score, sig.summary
+                            );
+                            let _ = db.insert_signal(&sig);
+                        }
                     }
                 }
             }

@@ -10,7 +10,10 @@ pub struct Config {
     pub poll_interval_secs: u64,
     pub min_inflow_usd_1h: f64,
     pub min_inflow_usd_4h: f64,
+    pub min_inflow_usd_5m: f64,
+    pub min_inflow_usd_15m: f64,
     pub min_buy_ratio_pct: f64,
+    pub min_unique_buyers: usize,
     pub min_market_cap_usd: f64,
     pub max_market_cap_usd: f64,
     pub solana_tracked_programs: Vec<String>,
@@ -56,10 +59,25 @@ impl Config {
             .parse::<f64>()
             .unwrap_or(2000.0);
 
+        let min_inflow_usd_5m = env::var("MIN_INFLOW_USD_5M")
+            .unwrap_or_else(|_| "100.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(100.0);
+
+        let min_inflow_usd_15m = env::var("MIN_INFLOW_USD_15M")
+            .unwrap_or_else(|_| "250.0".to_string())
+            .parse::<f64>()
+            .unwrap_or(250.0);
+
         let min_buy_ratio_pct = env::var("MIN_BUY_RATIO_PCT")
             .unwrap_or_else(|_| "60.0".to_string())
             .parse::<f64>()
             .unwrap_or(60.0);
+
+        let min_unique_buyers = env::var("MIN_UNIQUE_BUYERS")
+            .unwrap_or_else(|_| "3".to_string())
+            .parse::<usize>()
+            .unwrap_or(3);
 
         let min_market_cap_usd = env::var("MIN_MARKET_CAP_USD")
             .unwrap_or_else(|_| "50000.0".to_string())
@@ -98,7 +116,10 @@ impl Config {
             poll_interval_secs,
             min_inflow_usd_1h,
             min_inflow_usd_4h,
+            min_inflow_usd_5m,
+            min_inflow_usd_15m,
             min_buy_ratio_pct,
+            min_unique_buyers,
             min_market_cap_usd,
             max_market_cap_usd,
             solana_tracked_programs,

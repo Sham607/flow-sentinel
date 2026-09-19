@@ -3,35 +3,45 @@ use chrono::Utc;
 use crate::models::{FlowSignal, SignalType, TimeframeMetrics};
 
 pub struct SignalDetector {
+    min_inflow_5m: f64,
+    min_inflow_15m: f64,
     min_inflow_1h: f64,
     min_inflow_4h: f64,
     min_buy_ratio: f64,
+    min_unique_buyers: usize,
     min_market_cap: f64,
     max_market_cap: f64,
 }
 
 impl SignalDetector {
     pub fn new(
+        min_inflow_5m: f64,
+        min_inflow_15m: f64,
         min_inflow_1h: f64,
         min_inflow_4h: f64,
         min_buy_ratio: f64,
+        min_unique_buyers: usize,
         min_market_cap: f64,
         max_market_cap: f64,
     ) -> Self {
         Self {
+            min_inflow_5m,
+            min_inflow_15m,
             min_inflow_1h,
             min_inflow_4h,
             min_buy_ratio,
+            min_unique_buyers,
             min_market_cap,
             max_market_cap,
         }
     }
 
     pub fn detect_signal(&self, metrics: &TimeframeMetrics, market_cap: Option<f64>) -> Option<FlowSignal> {
-        let min_inflow = if metrics.timeframe == "1H" {
-            self.min_inflow_1h
-        } else {
-            self.min_inflow_4h
+        let min_inflow = match metrics.timeframe.as_str() {
+            "5M" => self.min_inflow_5m,
+            "15M" => self.min_inflow_15m,
+            "1H" => self.min_inflow_1h,
+            _ => self.min_inflow_4h,
         };
 
         // Rule 1: Wash trading detection (High volume, but only 1 unique buyer)
@@ -55,7 +65,7 @@ impl SignalDetector {
         // Rule 2: Strong Accumulation (Gated by Market Cap range if available)
         if metrics.net_inflow_usd >= min_inflow
             && metrics.buy_ratio_pct >= self.min_buy_ratio
-            && metrics.unique_buyers >= 3
+            && metrics.unique_buyers >= self.min_unique_buyers
         {
             if let Some(mc) = market_cap {
                 if mc < self.min_market_cap || mc > self.max_market_cap {

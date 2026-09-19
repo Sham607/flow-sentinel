@@ -26,7 +26,9 @@ enum ActiveTab {
     FlowFeed = 1,
     Metrics1H = 2,
     Metrics4H = 3,
-    ConfigChain = 4,
+    Metrics15M = 4,
+    Metrics5M = 5,
+    ConfigChain = 6,
 }
 
 struct AppState {
@@ -35,6 +37,8 @@ struct AppState {
     swaps: Vec<SwapRecord>,
     leaderboard_1h: Vec<FlowSignal>,
     leaderboard_4h: Vec<FlowSignal>,
+    leaderboard_15m: Vec<FlowSignal>,
+    leaderboard_5m: Vec<FlowSignal>,
     db: Arc<SentinelDb>,
     selected_index: usize,
     status_msg: String,
@@ -48,9 +52,11 @@ impl AppState {
             swaps: Vec::new(),
             leaderboard_1h: Vec::new(),
             leaderboard_4h: Vec::new(),
+            leaderboard_15m: Vec::new(),
+            leaderboard_5m: Vec::new(),
             db,
             selected_index: 0,
-            status_msg: "Radar active. Monitoring 1H/4H flow...".to_string(),
+            status_msg: "Radar active. Monitoring 5M/15M/1H/4H flow...".to_string(),
         }
     }
 
@@ -67,6 +73,12 @@ impl AppState {
         if let Ok(lb4) = self.db.get_timeframe_leaderboard("4H", 30) {
             self.leaderboard_4h = lb4;
         }
+        if let Ok(lb15) = self.db.get_timeframe_leaderboard("15M", 30) {
+            self.leaderboard_15m = lb15;
+        }
+        if let Ok(lb5) = self.db.get_timeframe_leaderboard("5M", 30) {
+            self.leaderboard_5m = lb5;
+        }
     }
 
     fn next_tab(&mut self) {
@@ -74,7 +86,9 @@ impl AppState {
             ActiveTab::RadarSignals => ActiveTab::FlowFeed,
             ActiveTab::FlowFeed => ActiveTab::Metrics1H,
             ActiveTab::Metrics1H => ActiveTab::Metrics4H,
-            ActiveTab::Metrics4H => ActiveTab::ConfigChain,
+            ActiveTab::Metrics4H => ActiveTab::Metrics15M,
+            ActiveTab::Metrics15M => ActiveTab::Metrics5M,
+            ActiveTab::Metrics5M => ActiveTab::ConfigChain,
             ActiveTab::ConfigChain => ActiveTab::RadarSignals,
         };
         self.selected_index = 0;
@@ -86,7 +100,9 @@ impl AppState {
             ActiveTab::FlowFeed => ActiveTab::RadarSignals,
             ActiveTab::Metrics1H => ActiveTab::FlowFeed,
             ActiveTab::Metrics4H => ActiveTab::Metrics1H,
-            ActiveTab::ConfigChain => ActiveTab::Metrics4H,
+            ActiveTab::Metrics15M => ActiveTab::Metrics4H,
+            ActiveTab::Metrics5M => ActiveTab::Metrics15M,
+            ActiveTab::ConfigChain => ActiveTab::Metrics5M,
         };
         self.selected_index = 0;
     }
@@ -102,15 +118,18 @@ async fn main() -> Result<()> {
         database_path: "data/flow_sentinel.db".to_string(),
         poll_interval_secs: 10,
         min_inflow_usd_1h: 500.0,
-        min_inflow_usd_4h: 2000.0,
-        min_buy_ratio_pct: 60.0,
+        min_inflow_usd_4h: 1000.0,
+        min_inflow_usd_5m: 100.0,
+        min_inflow_usd_15m: 250.0,
+        min_buy_ratio_pct: 55.0,
+        min_unique_buyers: 3,
         min_market_cap_usd: 50000.0,
         max_market_cap_usd: 5000000.0,
         solana_tracked_programs: flow_sentinel::chains::solana::DEFAULT_TRACKED_PROGRAMS
             .iter()
             .map(|s| s.to_string())
             .collect(),
-        solana_max_tx_per_cycle: 40,
+        solana_max_tx_per_cycle: 15,
         solana_sigs_per_feed: 100,
     });
 
@@ -147,7 +166,9 @@ async fn main() -> Result<()> {
                     KeyCode::Char('2') => app.active_tab = ActiveTab::FlowFeed,
                     KeyCode::Char('3') => app.active_tab = ActiveTab::Metrics1H,
                     KeyCode::Char('4') => app.active_tab = ActiveTab::Metrics4H,
-                    KeyCode::Char('5') => app.active_tab = ActiveTab::ConfigChain,
+                    KeyCode::Char('5') => app.active_tab = ActiveTab::Metrics15M,
+                    KeyCode::Char('6') => app.active_tab = ActiveTab::Metrics5M,
+                    KeyCode::Char('7') => app.active_tab = ActiveTab::ConfigChain,
                     KeyCode::Char('r') => {
                         app.refresh_data();
                         app.status_msg = "Data manually refreshed.".to_string();
@@ -192,7 +213,9 @@ fn ui(f: &mut Frame, app: &AppState) {
         "[2] LIVE FLOW FEED",
         "[3] 1H ACCUMULATION",
         "[4] 4H ACCUMULATION",
-        "[5] CHAIN & RPC STATS",
+        "[5] 15M ACCUMULATION",
+        "[6] 5M ACCUMULATION",
+        "[7] CHAIN & RPC STATS",
     ];
 
     let selected_tab_idx = match app.active_tab {
@@ -200,7 +223,9 @@ fn ui(f: &mut Frame, app: &AppState) {
         ActiveTab::FlowFeed => 1,
         ActiveTab::Metrics1H => 2,
         ActiveTab::Metrics4H => 3,
-        ActiveTab::ConfigChain => 4,
+        ActiveTab::Metrics15M => 4,
+        ActiveTab::Metrics5M => 5,
+        ActiveTab::ConfigChain => 6,
     };
 
     let tabs = Tabs::new(titles)
@@ -227,13 +252,15 @@ fn ui(f: &mut Frame, app: &AppState) {
         ActiveTab::FlowFeed => render_feed_tab(f, chunks[1], app),
         ActiveTab::Metrics1H => render_timeframe_tab(f, chunks[1], &app.leaderboard_1h, "1-HOUR"),
         ActiveTab::Metrics4H => render_timeframe_tab(f, chunks[1], &app.leaderboard_4h, "4-HOUR"),
+        ActiveTab::Metrics15M => render_timeframe_tab(f, chunks[1], &app.leaderboard_15m, "15-MIN"),
+        ActiveTab::Metrics5M => render_timeframe_tab(f, chunks[1], &app.leaderboard_5m, "5-MIN"),
         ActiveTab::ConfigChain => render_config_tab(f, chunks[1]),
     }
 
     // Footer
     let footer_text = vec![
         Span::raw("Keys: "),
-        Span::styled("[1-5 / Tab]", Style::default().fg(Color::Yellow)),
+        Span::styled("[1-7 / Tab]", Style::default().fg(Color::Yellow)),
         Span::raw(" Switch Tab | "),
         Span::styled("[r]", Style::default().fg(Color::Green)),
         Span::raw(" Refresh | "),

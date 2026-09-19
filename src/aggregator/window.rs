@@ -9,11 +9,15 @@ impl RollingAggregator {
     pub fn compute_metrics(
         chain: Chain,
         swaps: &[SwapRecord],
-        timeframe_hours: i64,
+        timeframe_minutes: i64,
     ) -> Vec<TimeframeMetrics> {
         let now = Utc::now();
-        let window_start = now - Duration::hours(timeframe_hours);
-        let timeframe_label = format!("{}H", timeframe_hours);
+        let window_start = now - Duration::minutes(timeframe_minutes);
+        let timeframe_label = if timeframe_minutes % 60 == 0 {
+            format!("{}H", timeframe_minutes / 60)
+        } else {
+            format!("{}M", timeframe_minutes)
+        };
 
         // Filter swaps within window
         let recent_swaps: Vec<&SwapRecord> = swaps
