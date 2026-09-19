@@ -41,6 +41,7 @@ async fn main() -> Result<()> {
         config.min_inflow_usd_4h,
         config.min_buy_ratio_pct,
         config.min_unique_buyers,
+        config.detect_wash_trading,
         config.min_market_cap_usd,
         config.max_market_cap_usd,
     );

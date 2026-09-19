@@ -54,7 +54,7 @@ fn test_window_aggregator_and_strong_accumulation() {
     assert!(m.buy_ratio_pct > 90.0);
     assert_eq!(m.timeframe, "1H");
 
-    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, 50000.0, 5000000.0);
+    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, true, 50000.0, 5000000.0);
     let sig = detector.detect_signal(m, Some(500000.0));
     assert!(sig.is_some());
     let sig = sig.unwrap();
@@ -94,7 +94,7 @@ fn test_wash_trading_detector_gating() {
     assert_eq!(m.unique_buyers, 1);
     assert_eq!(m.total_volume_usd, 2500.0);
 
-    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, 50000.0, 5000000.0);
+    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, true, 50000.0, 5000000.0);
     let sig = detector.detect_signal(m, None).unwrap();
     assert!(matches!(sig.signal_type, SignalType::WashTradingSuspect));
 }
@@ -152,7 +152,7 @@ fn test_five_minute_window_and_threshold() {
     assert_eq!(m15.buy_volume_usd, 160.0);
 
     // Detector: 5M label uses the 5M threshold ($100), so $120 net inflow passes
-    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, 50000.0, 5000000.0);
+    let detector = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, true, 50000.0, 5000000.0);
     let sig = detector.detect_signal(m5, Some(500000.0)).unwrap();
     assert!(matches!(sig.signal_type, SignalType::StrongAccumulation));
     assert_eq!(sig.timeframe, "5M");
@@ -166,6 +166,45 @@ fn test_five_minute_window_and_threshold() {
     let mut m2buyers = m5.clone();
     m2buyers.unique_buyers = 2;
     assert!(detector.detect_signal(&m2buyers, Some(500000.0)).is_none());
+}
+
+#[test]
+fn test_wash_detection_toggle_off() {
+    let now = Utc::now();
+    let token = "0xWASH_TOGGLE".to_string();
+
+    // 1 single buyer churning 5 swaps (classic wash pattern)
+    let mut swaps = Vec::new();
+    for i in 1..=5 {
+        swaps.push(SwapRecord {
+            chain: Chain::Solana,
+            token_address: token.clone(),
+            token_symbol: "WASH".to_string(),
+            swapper_address: "SOL_CHURNER_TOGGLE_111".to_string(),
+            side: SwapSide::Buy,
+            amount_usd: 500.0,
+            token_amount: 10000.0,
+            pool_address: "SOL_POOL".to_string(),
+            tx_hash: format!("SOL_TX_TOGGLE_{}", i),
+            block_number_or_slot: 4000 + i,
+            timestamp: now - Duration::minutes(2 * i as i64),
+        });
+    }
+
+    let metrics_1h = RollingAggregator::compute_metrics(Chain::Solana, &swaps, 60);
+    let m = &metrics_1h[0];
+
+    // Toggle ON: wash is detected
+    let det_on = SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, true, 50000.0, 5000000.0);
+    assert!(matches!(
+        det_on.detect_signal(m, None).unwrap().signal_type,
+        SignalType::WashTradingSuspect
+    ));
+
+    // Toggle OFF: no signal at all for the same metrics
+    let det_off =
+        SignalDetector::new(100.0, 250.0, 500.0, 1000.0, 55.0, 3, false, 50000.0, 5000000.0);
+    assert!(det_off.detect_signal(m, None).is_none());
 }
 
 #[test]

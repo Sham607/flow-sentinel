@@ -9,6 +9,7 @@ pub struct SignalDetector {
     min_inflow_4h: f64,
     min_buy_ratio: f64,
     min_unique_buyers: usize,
+    detect_wash_trading: bool,
     min_market_cap: f64,
     max_market_cap: f64,
 }
@@ -21,6 +22,7 @@ impl SignalDetector {
         min_inflow_4h: f64,
         min_buy_ratio: f64,
         min_unique_buyers: usize,
+        detect_wash_trading: bool,
         min_market_cap: f64,
         max_market_cap: f64,
     ) -> Self {
@@ -31,6 +33,7 @@ impl SignalDetector {
             min_inflow_4h,
             min_buy_ratio,
             min_unique_buyers,
+            detect_wash_trading,
             min_market_cap,
             max_market_cap,
         }
@@ -45,7 +48,12 @@ impl SignalDetector {
         };
 
         // Rule 1: Wash trading detection (High volume, but only 1 unique buyer)
-        if metrics.total_volume_usd >= min_inflow && metrics.unique_buyers <= 1 && metrics.total_swaps >= 3 {
+        // Gated by DETECT_WASH_TRADING: "false" disables it entirely.
+        if self.detect_wash_trading
+            && metrics.total_volume_usd >= min_inflow
+            && metrics.unique_buyers <= 1
+            && metrics.total_swaps >= 3
+        {
             return Some(FlowSignal {
                 chain: metrics.chain,
                 token_address: metrics.token_address.clone(),

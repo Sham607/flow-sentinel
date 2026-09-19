@@ -61,8 +61,19 @@ impl AppState {
     }
 
     fn refresh_data(&mut self) {
-        if let Ok(signals) = self.db.get_recent_signals(50) {
-            self.signals = signals;
+        // Tab 1 hanya menampilkan sinyal akumulasi; wash/distribution tetap
+        // tersimpan di DB & journal tapi tidak memenuhi layar.
+        if let Ok(all) = self.db.get_recent_signals(300) {
+            self.signals = all
+                .into_iter()
+                .filter(|s| {
+                    !matches!(
+                        s.signal_type,
+                        SignalType::WashTradingSuspect | SignalType::HeavyDistribution
+                    )
+                })
+                .take(50)
+                .collect();
         }
         if let Ok(swaps) = self.db.get_recent_swaps(100) {
             self.swaps = swaps;
@@ -122,7 +133,8 @@ async fn main() -> Result<()> {
         min_inflow_usd_5m: 100.0,
         min_inflow_usd_15m: 250.0,
         min_buy_ratio_pct: 55.0,
-        min_unique_buyers: 3,
+        min_unique_buyers: 4,
+        detect_wash_trading: true,
         min_market_cap_usd: 50000.0,
         max_market_cap_usd: 5000000.0,
         solana_tracked_programs: flow_sentinel::chains::solana::DEFAULT_TRACKED_PROGRAMS
