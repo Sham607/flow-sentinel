@@ -137,6 +137,7 @@ async fn main() -> Result<()> {
         min_buy_ratio_pct: 55.0,
         min_unique_buyers: 4,
         detect_wash_trading: true,
+        robinhood_ingest_enabled: true,
         min_market_cap_usd: 50000.0,
         max_market_cap_usd: 5000000.0,
         solana_tracked_programs: flow_sentinel::chains::solana::DEFAULT_TRACKED_PROGRAMS

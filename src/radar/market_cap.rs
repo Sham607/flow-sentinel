@@ -9,6 +9,7 @@ pub struct MarketCapResolver {
     cache: Arc<RwLock<HashMap<String, (Option<f64>, std::time::Instant)>>>,
     symbol_cache: Arc<RwLock<HashMap<String, (Option<String>, std::time::Instant)>>>,
     sol_price_cache: Arc<RwLock<Option<(f64, std::time::Instant)>>>,
+    usd_price_cache: Arc<RwLock<HashMap<String, (Option<f64>, std::time::Instant)>>>,
 }
 
 impl MarketCapResolver {
@@ -21,6 +22,7 @@ impl MarketCapResolver {
             cache: Arc::new(RwLock::new(HashMap::new())),
             symbol_cache: Arc::new(RwLock::new(HashMap::new())),
             sol_price_cache: Arc::new(RwLock::new(None)),
+            usd_price_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -58,6 +60,37 @@ impl MarketCapResolver {
         if let Some(p) = price {
             let mut c = self.sol_price_cache.write().await;
             *c = Some((p, std::time::Instant::now()));
+        }
+        price
+    }
+
+    /// Live USD price of an EVM token via DexScreener (cached 60 seconds,
+    /// negative results cached too so a dead token doesn't hammer the API).
+    pub async fn get_token_usd_price(&self, token_address: &str) -> Option<f64> {
+        let key = token_address.to_lowercase();
+        {
+            let c = self.usd_price_cache.read().await;
+            if let Some((p, at)) = c.get(&key) {
+                if at.elapsed() < std::time::Duration::from_secs(60) {
+                    return *p;
+                }
+            }
+        }
+
+        let price = self
+            .fetch_pair_json(&key)
+            .await
+            .and_then(|json| json.get("pairs").and_then(|p| p.as_array()).cloned())
+            .and_then(|pairs| pairs.first().cloned())
+            .and_then(|p| {
+                p.get("priceUsd")
+                    .and_then(|v| v.as_str())
+                    .and_then(|s| s.parse::<f64>().ok())
+            });
+
+        {
+            let mut c = self.usd_price_cache.write().await;
+            c.insert(key, (price, std::time::Instant::now()));
         }
         price
     }

@@ -15,6 +15,7 @@ pub struct Config {
     pub min_buy_ratio_pct: f64,
     pub min_unique_buyers: usize,
     pub detect_wash_trading: bool,
+    pub robinhood_ingest_enabled: bool,
     pub min_market_cap_usd: f64,
     pub max_market_cap_usd: f64,
     pub solana_tracked_programs: Vec<String>,
@@ -87,6 +88,12 @@ impl Config {
             .to_lowercase()
             != "false";
 
+        let robinhood_ingest_enabled = env::var("ROBINHOOD_INGEST_ENABLED")
+            .unwrap_or_else(|_| "true".to_string())
+            .trim()
+            .to_lowercase()
+            != "false";
+
         let min_market_cap_usd = env::var("MIN_MARKET_CAP_USD")
             .unwrap_or_else(|_| "50000.0".to_string())
             .parse::<f64>()
@@ -129,6 +136,7 @@ impl Config {
             min_buy_ratio_pct,
             min_unique_buyers,
             detect_wash_trading,
+            robinhood_ingest_enabled,
             min_market_cap_usd,
             max_market_cap_usd,
             solana_tracked_programs,

@@ -28,12 +28,15 @@ async fn main() -> Result<()> {
     let config = Config::load()?;
     let db = Arc::new(SentinelDb::new(&config.database_path)?);
 
-    let rh_scanner = RobinhoodScanner::new(config.robinhood_rpc_urls.clone());
+    let mc_resolver = Arc::new(MarketCapResolver::new());
+    let rh_scanner = RobinhoodScanner::new(
+        config.robinhood_rpc_urls.clone(),
+        Arc::clone(&mc_resolver),
+    );
     let sol_scanner = SolanaScanner::new(
         config.solana_rpc_url.clone(),
         config.solana_tracked_programs.clone(),
     );
-    let mc_resolver = MarketCapResolver::new();
     let detector = SignalDetector::new(
         config.min_inflow_usd_5m,
         config.min_inflow_usd_15m,
@@ -50,6 +53,10 @@ async fn main() -> Result<()> {
     match rh_scanner.get_latest_block_number().await {
         Ok(block) => println!("[ROBINHOOD RPC 🌐] Connected! Latest Block: {}", block),
         Err(e) => eprintln!("[ROBINHOOD RPC ⚠️] Connection warning: {}", e),
+    }
+
+    if !config.robinhood_ingest_enabled {
+        println!("[ROBINHOOD ⏸️] Ingest DISABLED via .env (ROBINHOOD_INGEST_ENABLED=false) — swaps & signals paused.");
     }
 
     match sol_scanner.get_latest_slot().await {
@@ -118,31 +125,38 @@ async fn main() -> Result<()> {
 
     // Main loop: Robinhood scan + Signal evaluation
     loop {
-        // 1. Ingest Robinhood L2 Swaps
-        if let Ok(latest_rh) = rh_scanner.get_latest_block_number().await {
-            let last_cursor = db.get_cursor(Chain::Robinhood)?.unwrap_or(latest_rh.saturating_sub(config.robinhood_scan_chunk));
-            let from_block = last_cursor + 1;
-            let to_block = latest_rh.min(from_block + config.robinhood_scan_chunk);
+        // 1. Ingest Robinhood L2 Swaps (skipped entirely when disabled via .env)
+        if config.robinhood_ingest_enabled {
+            if let Ok(latest_rh) = rh_scanner.get_latest_block_number().await {
+                let last_cursor = db.get_cursor(Chain::Robinhood)?.unwrap_or(latest_rh.saturating_sub(config.robinhood_scan_chunk));
+                let from_block = last_cursor + 1;
+                let to_block = latest_rh.min(from_block + config.robinhood_scan_chunk);
 
-            if from_block <= to_block {
-                match rh_scanner.fetch_swaps_in_range(from_block, to_block).await {
-                    Ok(swaps) => {
-                        let count = swaps.len();
-                        for sw in swaps {
-                            let _ = db.insert_swap(&sw);
+                if from_block <= to_block {
+                    match rh_scanner.fetch_swaps_in_range(from_block, to_block).await {
+                        Ok(swaps) => {
+                            let count = swaps.len();
+                            for sw in swaps {
+                                let _ = db.insert_swap(&sw);
+                            }
+                            let _ = db.set_cursor(Chain::Robinhood, to_block);
+                            if count > 0 {
+                                println!("[ROBINHOOD SCAN] Indexed {} swaps from blocks {}..{}", count, from_block, to_block);
+                            }
                         }
-                        let _ = db.set_cursor(Chain::Robinhood, to_block);
-                        if count > 0 {
-                            println!("[ROBINHOOD SCAN] Indexed {} swaps from blocks {}..{}", count, from_block, to_block);
-                        }
+                        Err(e) => eprintln!("[ROBINHOOD SCAN ⚠️] Range {}..{} error: {}", from_block, to_block, e),
                     }
-                    Err(e) => eprintln!("[ROBINHOOD SCAN ⚠️] Range {}..{} error: {}", from_block, to_block, e),
                 }
             }
         }
 
-        // 2. Evaluate rolling windows (5M / 15M / 1H / 4H) for both chains
-        for chain in [Chain::Robinhood, Chain::Solana] {
+        // 2. Evaluate rolling windows (5M / 15M / 1H / 4H) — Robinhood skipped when ingest disabled
+        let active_chains: Vec<Chain> = if config.robinhood_ingest_enabled {
+            vec![Chain::Robinhood, Chain::Solana]
+        } else {
+            vec![Chain::Solana]
+        };
+        for chain in active_chains {
             let window_start_4h = Utc::now() - Duration::hours(4);
             if let Ok(swaps) = db.get_recent_swaps_in_window(chain, window_start_4h) {
                 // Windows in minutes; the 4H swap set is a superset, aggregator filters per window
