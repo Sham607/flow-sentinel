@@ -39,13 +39,14 @@ struct AppState {
     leaderboard_4h: Vec<FlowSignal>,
     leaderboard_15m: Vec<FlowSignal>,
     leaderboard_5m: Vec<FlowSignal>,
+    min_unique_buyers: usize,
     db: Arc<SentinelDb>,
     selected_index: usize,
     status_msg: String,
 }
 
 impl AppState {
-    fn new(db: Arc<SentinelDb>) -> Self {
+    fn new(db: Arc<SentinelDb>, min_unique_buyers: usize) -> Self {
         Self {
             active_tab: ActiveTab::RadarSignals,
             signals: Vec::new(),
@@ -54,6 +55,7 @@ impl AppState {
             leaderboard_4h: Vec::new(),
             leaderboard_15m: Vec::new(),
             leaderboard_5m: Vec::new(),
+            min_unique_buyers,
             db,
             selected_index: 0,
             status_msg: "Radar active. Monitoring 5M/15M/1H/4H flow...".to_string(),
@@ -78,16 +80,16 @@ impl AppState {
         if let Ok(swaps) = self.db.get_recent_swaps(100) {
             self.swaps = swaps;
         }
-        if let Ok(lb1) = self.db.get_timeframe_leaderboard("1H", 30) {
+        if let Ok(lb1) = self.db.get_timeframe_leaderboard("1H", self.min_unique_buyers, 30) {
             self.leaderboard_1h = lb1;
         }
-        if let Ok(lb4) = self.db.get_timeframe_leaderboard("4H", 30) {
+        if let Ok(lb4) = self.db.get_timeframe_leaderboard("4H", self.min_unique_buyers, 30) {
             self.leaderboard_4h = lb4;
         }
-        if let Ok(lb15) = self.db.get_timeframe_leaderboard("15M", 30) {
+        if let Ok(lb15) = self.db.get_timeframe_leaderboard("15M", self.min_unique_buyers, 30) {
             self.leaderboard_15m = lb15;
         }
-        if let Ok(lb5) = self.db.get_timeframe_leaderboard("5M", 30) {
+        if let Ok(lb5) = self.db.get_timeframe_leaderboard("5M", self.min_unique_buyers, 30) {
             self.leaderboard_5m = lb5;
         }
     }
@@ -154,7 +156,7 @@ async fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let mut app = AppState::new(db);
+    let mut app = AppState::new(db, config.min_unique_buyers);
     app.refresh_data();
 
     let mut last_refresh = std::time::Instant::now();

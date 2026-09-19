@@ -350,7 +350,12 @@ impl SentinelDb {
         Ok(out)
     }
 
-    pub fn get_timeframe_leaderboard(&self, tf: &str, limit: usize) -> Result<Vec<FlowSignal>> {
+    pub fn get_timeframe_leaderboard(
+        &self,
+        tf: &str,
+        min_buyers: usize,
+        limit: usize,
+    ) -> Result<Vec<FlowSignal>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
             "SELECT chain, token_address, token_symbol, timeframe, signal_type,
@@ -358,12 +363,14 @@ impl SentinelDb {
                     unique_buyers, summary, detected_at
              FROM flow_signals
              WHERE timeframe = ?1 AND token_symbol != 'RH-V4'
+               AND signal_type = 'StrongAccumulation'
+               AND unique_buyers >= ?2
              GROUP BY token_address
              ORDER BY net_inflow_usd DESC
-             LIMIT ?2",
+             LIMIT ?3",
         )?;
 
-        let rows = stmt.query_map(params![tf, limit as i64], |row| {
+        let rows = stmt.query_map(params![tf, min_buyers as i64, limit as i64], |row| {
             let ch_str: String = row.get(0)?;
             let sig_str: String = row.get(4)?;
             let chain = if ch_str == "Robinhood" {
